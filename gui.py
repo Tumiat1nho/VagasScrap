@@ -5,6 +5,7 @@ Inicie com: python gui.py  ou  abrir_gui.bat
 
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import queue
 import sys
@@ -46,6 +47,7 @@ class VagasScrapGUI(ctk.CTk):
         self.log_queue: queue.Queue = queue.Queue()
         self.is_running = False
         self.results_double_var = ctk.DoubleVar(value=25)
+        self.extra_terms_list: list[str] = []
 
         self._build_ui()
         self._poll_log_queue()
@@ -65,7 +67,7 @@ class VagasScrapGUI(ctk.CTk):
 
         self.right = ctk.CTkFrame(self, corner_radius=0)
         self.right.grid(row=0, column=1, sticky="nsew")
-        self.right.grid_rowconfigure(1, weight=1)
+        self.right.grid_rowconfigure(2, weight=1)
         self.right.grid_columnconfigure(0, weight=1)
 
         self._build_form(self.left)
@@ -90,6 +92,28 @@ class VagasScrapGUI(ctk.CTk):
         self.search_entry = ctk.CTkEntry(
             p, placeholder_text='ex: "desenvolvedor python"', height=36)
         self.search_entry.grid(row=row, column=0, padx=18, pady=(0, 12), sticky="ew")
+        row += 1
+
+        # ── Termos adicionais ────────────────────────────────────────────
+        self._label(p, row, "Termos adicionais  (opcional)")
+        row += 1
+        ctk.CTkLabel(p, text="Busca para cada termo e combina os resultados",
+                     font=ctk.CTkFont(size=11), text_color="gray").grid(
+            row=row, column=0, padx=18, pady=(0, 4), sticky="w")
+        row += 1
+        add_frame = ctk.CTkFrame(p, fg_color="transparent")
+        add_frame.grid(row=row, column=0, padx=18, pady=(0, 4), sticky="ew")
+        add_frame.grid_columnconfigure(0, weight=1)
+        self.extra_term_entry = ctk.CTkEntry(
+            add_frame, placeholder_text='ex: "analista de dados"', height=32)
+        self.extra_term_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.extra_term_entry.bind("<Return>", lambda e: self._add_extra_term())
+        ctk.CTkButton(add_frame, text="+", width=36, height=32,
+                      command=self._add_extra_term).grid(row=0, column=1)
+        row += 1
+        self.extra_terms_frame = ctk.CTkFrame(p, fg_color="transparent")
+        self.extra_terms_frame.grid(row=row, column=0, padx=18, pady=(0, 12), sticky="ew")
+        self.extra_terms_frame.grid_columnconfigure(0, weight=1)
         row += 1
 
         # ── Localização ─────────────────────────────────────────────────
@@ -281,15 +305,29 @@ class VagasScrapGUI(ctk.CTk):
                      font=ctk.CTkFont(size=13, weight="bold")).grid(
             row=0, column=0, padx=15, pady=10, sticky="w")
 
+        # ── Barra de progresso (oculta até iniciar busca) ────────────────
+        self.progress_frame = ctk.CTkFrame(p, fg_color=("gray88", "gray16"),
+                                           corner_radius=0)
+        self.progress_frame.grid(row=1, column=0, sticky="ew")
+        self.progress_frame.grid_columnconfigure(0, weight=1)
+        self.progress_bar = ctk.CTkProgressBar(self.progress_frame, height=8)
+        self.progress_bar.grid(row=0, column=0, sticky="ew", padx=15, pady=(8, 2))
+        self.progress_bar.set(0)
+        self.progress_label = ctk.CTkLabel(
+            self.progress_frame, text="",
+            font=ctk.CTkFont(size=11), text_color="gray")
+        self.progress_label.grid(row=1, column=0, sticky="w", padx=15, pady=(0, 6))
+        self.progress_frame.grid_remove()  # oculto por padrão
+
         self.log_box = ctk.CTkTextbox(
             p, font=ctk.CTkFont(family="Consolas", size=12),
             wrap="word", state="disabled", corner_radius=0)
-        self.log_box.grid(row=1, column=0, sticky="nsew")
+        self.log_box.grid(row=2, column=0, sticky="nsew")
 
         self.status_var = ctk.StringVar(value="Pronto.")
         status = ctk.CTkFrame(p, height=30, corner_radius=0,
                               fg_color=("gray78", "gray15"))
-        status.grid(row=2, column=0, sticky="ew")
+        status.grid(row=3, column=0, sticky="ew")
         status.grid_propagate(False)
         ctk.CTkLabel(status, textvariable=self.status_var,
                      font=ctk.CTkFont(size=11)).pack(side="left", padx=12, pady=5)
@@ -298,10 +336,53 @@ class VagasScrapGUI(ctk.CTk):
     #  Helpers                                                             #
     # ------------------------------------------------------------------ #
 
+    def _show_progress(self, total: int):
+        self.progress_bar.set(0)
+        self.progress_label.configure(text=f"0 / {total} fontes concluídas")
+        self.progress_frame.grid()
+
+    def _update_progress(self, completed: int, total: int):
+        self.progress_bar.set(completed / total if total else 1)
+        self.progress_label.configure(text=f"{completed} / {total} fontes concluídas")
+
+    def _hide_progress(self):
+        self.progress_frame.grid_remove()
+
     def _label(self, parent, row, text):
         ctk.CTkLabel(parent, text=text,
                      font=ctk.CTkFont(weight="bold")).grid(
             row=row, column=0, padx=18, pady=(6, 2), sticky="w")
+
+    def _add_extra_term(self):
+        text = self.extra_term_entry.get().strip()
+        if not text or text in self.extra_terms_list:
+            return
+        self.extra_terms_list.append(text)
+        self.extra_term_entry.delete(0, "end")
+        self._refresh_extra_terms()
+
+    def _remove_extra_term(self, term: str):
+        if term in self.extra_terms_list:
+            self.extra_terms_list.remove(term)
+        self._refresh_extra_terms()
+
+    def _refresh_extra_terms(self):
+        for w in self.extra_terms_frame.winfo_children():
+            w.destroy()
+        for i, term in enumerate(self.extra_terms_list):
+            row_frame = ctk.CTkFrame(
+                self.extra_terms_frame, fg_color=("gray80", "gray25"), corner_radius=6)
+            row_frame.grid(row=i, column=0, sticky="ew", pady=2)
+            row_frame.grid_columnconfigure(0, weight=1)
+            ctk.CTkLabel(row_frame, text=term, anchor="w",
+                         font=ctk.CTkFont(size=12)).grid(
+                row=0, column=0, padx=8, pady=4, sticky="ew")
+            ctk.CTkButton(
+                row_frame, text="×", width=26, height=24,
+                fg_color="transparent", text_color="gray60",
+                hover_color=("gray70", "gray35"),
+                command=lambda t=term: self._remove_extra_term(t),
+            ).grid(row=0, column=1, padx=(0, 4))
 
     def _on_results_slider(self, value):
         self.results_label.configure(text=f"{int(value)} vagas")
@@ -356,7 +437,7 @@ class VagasScrapGUI(ctk.CTk):
         seniority = [k for k, v in self.seniority_vars.items() if v.get()] or None
 
         params = {
-            "search_term":   term,
+            "search_terms":  [term] + self.extra_terms_list,
             "location":      self.location_entry.get().strip() or "Brazil",
             "sites":         sites,
             "extra_sources": extra_sources,
@@ -383,61 +464,78 @@ class VagasScrapGUI(ctk.CTk):
             from database import save_jobs
             from filters import apply_all_filters
             from recruiter import enrich_recruiter_info
-            from scraper import search_jobs
 
             self.log_queue.put("\n" + "─" * 52 + "\n")
             self.log_queue.put(
                 f"Iniciando busca: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n")
 
-            frames: list[pd.DataFrame] = []
+            search_terms: list[str] = params["search_terms"]
 
-            # ── Job boards principais (JobSpy) ──────────────────────────
-            if params["sites"]:
-                df_main = search_jobs(
-                    search_term=params["search_term"],
-                    location=params["location"],
-                    sites=params["sites"],
-                    results_wanted=params["results_wanted"],
-                    hours_old=params["hours_old"],
-                    verbose=True,
-                )
-                if not df_main.empty:
-                    frames.append(df_main)
+            # ── Montar lista de tarefas individuais ─────────────────────
+            # Cada tarefa é (label, kind, term, source)
+            tasks: list[tuple] = []
+            for term in search_terms:
+                for site in (params["sites"] or []):
+                    tasks.append((f"{site} [{term}]", "jobspy", term, site))
+                for src in (params["extra_sources"] or []):
+                    tasks.append((f"{src} [{term}]", "extra", term, src))
+                for plat in (params["post_platforms"] or []):
+                    tasks.append((f"{plat} [{term}]", "posts", term, plat))
 
-            # ── Sites brasileiros & freelance ───────────────────────────
-            if params["extra_sources"]:
-                from extra_scrapers import search_extra
-                self.log_queue.put("\nBuscando em sites brasileiros & freelance...\n")
-                df_extra = search_extra(
-                    search_term=params["search_term"],
-                    sources=params["extra_sources"],
-                    results_per_source=params["results_wanted"],
-                    verbose=True,
-                )
-                if not df_extra.empty:
-                    self.log_queue.put(f"  Vagas extras: {len(df_extra)}\n")
-                    frames.append(df_extra)
-                else:
-                    self.log_queue.put("  Nenhuma vaga encontrada nas fontes extras.\n")
+            total = len(tasks)
+            self.log_queue.put(f"Executando {total} buscas em paralelo...\n")
+            self.after(0, lambda: self._show_progress(total))
 
-            # ── Posts de recrutadores em redes sociais ──────────────────
-            if params["post_platforms"]:
-                from posts_scraper import search_posts
-                self.log_queue.put("\nBuscando posts de recrutadores...\n")
-                df_posts = search_posts(
-                    search_term=params["search_term"],
-                    location=params["location"],
-                    platforms=params["post_platforms"],
-                    results_per_platform=15,
-                    verbose=True,
-                )
-                if not df_posts.empty:
-                    self.log_queue.put(f"  Posts encontrados: {len(df_posts)}\n")
-                    frames.append(df_posts)
-                else:
-                    self.log_queue.put("  Nenhum post encontrado.\n")
+            completed_count = 0
+            lock = threading.Lock()
 
-            df = pd.concat(frames, ignore_index=True, sort=False) if frames else pd.DataFrame()
+            def run_task(task: tuple) -> pd.DataFrame:
+                nonlocal completed_count
+                label, kind, term, source = task
+                result = pd.DataFrame()
+                try:
+                    if kind == "jobspy":
+                        from scraper import search_jobs
+                        result = search_jobs(
+                            search_term=term,
+                            location=params["location"],
+                            sites=[source],
+                            results_wanted=params["results_wanted"],
+                            hours_old=params["hours_old"],
+                            verbose=True,
+                        )
+                    elif kind == "extra":
+                        from extra_scrapers import search_extra
+                        result = search_extra(
+                            search_term=term,
+                            sources=[source],
+                            results_per_source=params["results_wanted"],
+                            verbose=True,
+                        )
+                    elif kind == "posts":
+                        from posts_scraper import search_posts
+                        result = search_posts(
+                            search_term=term,
+                            location=params["location"],
+                            platforms=[source],
+                            results_per_platform=15,
+                            verbose=True,
+                        )
+                except Exception as exc:
+                    self.log_queue.put(f"  ERRO [{label}]: {exc}\n")
+
+                with lock:
+                    completed_count += 1
+                    c = completed_count
+                self.after(0, lambda c=c: self._update_progress(c, total))
+                return result
+
+            max_workers = min(8, total) if total else 1
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                results = list(executor.map(run_task, tasks))
+
+            all_frames = [df for df in results if df is not None and not df.empty]
+            df = pd.concat(all_frames, ignore_index=True, sort=False) if all_frames else pd.DataFrame()
 
             if df.empty:
                 self.log_queue.put("\nNenhuma vaga encontrada.\n")
@@ -464,15 +562,16 @@ class VagasScrapGUI(ctk.CTk):
                 self.after(0, lambda: self.status_var.set("Nenhuma vaga após filtros."))
                 return
 
-            # Salvar no histórico
-            new_in_db = save_jobs(df, search_term=params["search_term"])
+            # Salvar no histórico (com todos os termos concatenados)
+            combined_term = " + ".join(search_terms)
+            new_in_db = save_jobs(df, search_term=combined_term)
             self.log_queue.put(f"Histórico: {new_in_db} nova(s) vaga(s) adicionada(s)\n")
 
             # Salvar arquivo
             out_dir = Path("output")
             out_dir.mkdir(exist_ok=True)
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-            slug = params["search_term"].replace(" ", "_")[:25]
+            slug = search_terms[0].replace(" ", "_")[:25]
             name = f"vagas_{slug}_{timestamp}"
 
             if params["fmt"] == "excel":
@@ -497,6 +596,7 @@ class VagasScrapGUI(ctk.CTk):
         finally:
             sys.stdout = old_stdout
             self.is_running = False
+            self.after(0, self._hide_progress)
             self.after(0, lambda: self.search_btn.configure(
                 state="normal", text="Buscar Vagas"))
 
