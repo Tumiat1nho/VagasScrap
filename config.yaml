@@ -1,0 +1,41 @@
+# config.yaml - Configuração de buscas agendadas
+# Use com: python main.py schedule
+
+searches:
+  - search_term: "desenvolvedor python"
+    location: "Rio de Janeiro, Brazil"
+    sites:
+      - linkedin
+      - indeed
+      - glassdoor
+    results_wanted: 30
+    hours_old: 168       # Vagas dos últimos 7 dias
+    skills:
+      - python
+      - django
+      - fastapi
+      - flask
+    remote_only: false
+
+  - search_term: "react developer"
+    location: "Brazil"
+    sites:
+      - linkedin
+      - indeed
+    results_wanted: 20
+    hours_old: 72        # Vagas dos últimos 3 dias
+    skills:
+      - react
+      - typescript
+      - javascript
+      - next
+    remote_only: true
+
+output:
+  directory: output        # Pasta onde os CSVs serão salvos
+  format: csv              # csv ou excel
+  filename_prefix: vagas   # Prefixo do arquivo de saída
+
+schedule:
+  enabled: true
+  interval_hours: 24       # Executar a cada 24 horas

@@ -1,0 +1,7 @@
+python-jobspy
+pandas
+pyyaml
+apscheduler
+openpyxl
+customtkinter
+ddgs
